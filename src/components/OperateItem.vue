@@ -6,12 +6,7 @@
         <!-- db index select -->
         <el-col :span="12">
           <el-select class="db-select" v-model="selectedDbIndex" placeholder="DB" @change="changeDb()" filterable default-first-option>
-            <el-option
-              v-for="index in dbs"
-              :key="index"
-              :label="'DB' + index"
-              :value="index">
-            </el-option>
+            <el-option v-for="index in dbs" :key="index" :label="'DB' + index" :value="index"></el-option>
             <!-- <span slot="prefix" class="fa fa-sitemap" style="font-size: 80%"></span> -->
           </el-select>
         </el-col>
@@ -30,15 +25,22 @@
     <el-form-item class="search-item">
       <el-row>
         <el-col :span="24">
-          <el-input class="search-input" v-model="searchMatch" @keyup.enter.native="changeMatchMode()" :placeholder="$t('message.enter_to_search')" size="mini">
+          <el-autocomplete
+            class="search-input"
+            v-model="searchMatch"
+            :fetch-suggestions="querySearchAsync"
+            @keyup.enter.native="changeMatchMode()"
+            :placeholder="$t('message.enter_to_search')"
+            size="mini"
+          >
             <span slot="suffix">
-              <i class="el-input__icon search-icon" :class="searchIcon"  @click="changeMatchMode()"></i>
+              <i class="el-input__icon search-icon" :class="searchIcon" @click="changeMatchMode()"></i>
 
               <el-tooltip effect="dark" :content="$t('message.exact_search')" placement="bottom">
                 <el-checkbox v-model="searchExact"></el-checkbox>
               </el-tooltip>
             </span>
-          </el-input>
+          </el-autocomplete>
         </el-col>
       </el-row>
     </el-form-item>
@@ -47,18 +49,13 @@
     <el-dialog :title="$t('message.add_new_key')" :visible.sync="newKeyDialog">
       <el-form label-position="top" size="mini">
         <el-form-item :label="$t('message.key_name')">
-          <el-input v-model='newKeyName'></el-input>
+          <el-input v-model="newKeyName"></el-input>
         </el-form-item>
 
         <el-form-item :label="$t('message.key_type')">
-          <el-select style='width: 100%' v-model="selectedNewKeyType">
-              <el-option
-                v-for="(type, showType) in newKeyTypes"
-                :key="type"
-                :label="showType"
-                :value="type">
-              </el-option>
-            </el-select>
+          <el-select style="width: 100%" v-model="selectedNewKeyType">
+            <el-option v-for="(type, showType) in newKeyTypes" :key="type" :label="showType" :value="type"></el-option>
+          </el-select>
         </el-form-item>
       </el-form>
 
@@ -85,6 +82,7 @@ export default {
       newKeyTypes: {
         String: 'string', Hash: 'hash', List: 'list', Set: 'set', Zset: 'zset',
       },
+      timeout: null,
     };
   },
   props: ['client'],
@@ -106,10 +104,45 @@ export default {
         this.dbs = [...Array(parseInt(reply[1])).keys()];
       }).catch((e) => {
         // config command may be renamed
-        this.dbs =  [...Array(16).keys()];
+        this.dbs = [...Array(16).keys()];
         // read dbs from info
         this.getDatabasesFromInfo();
       });
+    },
+    querySearchAsync(queryString, cb) {
+      const items = this.getHistoryItems();
+      const results = queryString ? items.filter(this.createStateFilter(queryString)) : items;
+
+      clearTimeout(this.timeout);
+      this.timeout = setTimeout(() => {
+        cb(results);
+      }, 500);
+    },
+    createStateFilter(queryString) {
+      return state => (state.value.toLowerCase().indexOf(queryString.toLowerCase()) === 0);
+    },
+    pushHistoryItem(item) {
+      const val = localStorage.getItem('history');
+      let items = [];
+      if (val) {
+        items = JSON.parse(val);
+      }
+
+      // maintain 20 length
+      if (items.length > 20) {
+        items = items.slice(-19);
+      }
+      items.push(item);
+
+      localStorage.setItem('history', JSON.stringify(items));
+    },
+    getHistoryItems() {
+      const val = localStorage.getItem('history');
+      if (val) {
+        return JSON.parse(val);
+      }
+
+      return [];
     },
     getDatabasesFromInfo() {
       if (!this.client) {
@@ -117,18 +150,18 @@ export default {
       }
 
       this.client.info().then((info) => {
-        try{
+        try {
           let lastDB = info.trim().split('\n').pop().match(/db(\d+)/)[1];
           lastDB = parseInt(lastDB);
 
           if (lastDB > 16) {
             this.dbs = [...Array(lastDB + 1).keys()];
           }
-        }catch (e) {};
-      }).catch(() => {});
+        } catch (e) { }
+      }).catch(() => { });
     },
     resetStatus() {
-      this.dbs =[0];
+      this.dbs = [0];
       this.selectedDbIndex = 0;
       this.searchMatch = '';
       this.searchExact = false;
@@ -139,19 +172,19 @@ export default {
       }
 
       this.client.select(this.selectedDbIndex)
-      .then(() => {
-        this.$parent.$parent.$parent.$refs.keyList.refreshKeyList();
-      })
-      // select is not allowed in cluster mode
-      .catch(e => {
-        this.$message.error({
-          message: e.message,
-          duration: 3000,
-        });
+        .then(() => {
+          this.$parent.$parent.$parent.$refs.keyList.refreshKeyList();
+        })
+        // select is not allowed in cluster mode
+        .catch((e) => {
+          this.$message.error({
+            message: e.message,
+            duration: 3000,
+          });
 
-        // reset to db0
-        this.selectedDbIndex = 0;
-      });
+          // reset to db0
+          this.selectedDbIndex = 0;
+        });
     },
     addNewKey() {
       if (!this.newKeyName) {
@@ -161,7 +194,7 @@ export default {
       // key to buffer
       const key = Buffer.from(this.newKeyName);
 
-      let promise = this.setDefaultValue(key, this.selectedNewKeyType);
+      const promise = this.setDefaultValue(key, this.selectedNewKeyType);
 
       promise.then(() => {
         this.$bus.$emit('refreshKeyList', this.client, key, 'add');
@@ -195,60 +228,66 @@ export default {
         return false;
       }
 
+      const item = { value: this.searchMatch };
+      this.pushHistoryItem(item);
+
       this.$parent.$parent.$parent.$refs.keyList.refreshKeyList();
     },
   },
-}
+};
 </script>
 
 <style type="text/css">
-  .connection-menu .db-select {
-    width: 100%;
-  }
-  /*fix el-select height different from el-input*/
-  .connection-menu .db-select .el-input__inner {
-    /*margin-top: 0.5px;*/
-    height: 30.5px;
-  }
-  .connection-menu .new-key-btn {
-    width: 100%;
-  }
-  .connection-menu .search-item {
-    margin-top: -10px;
-    margin-bottom: 15px;
-  }
-  .connection-menu .search-input .el-input__inner {
-    padding-right: 43px;
-    /*margin-top: -10px;;
+.connection-menu .db-select {
+  width: 100%;
+}
+/*fix el-select height different from el-input*/
+.connection-menu .db-select .el-input__inner {
+  /*margin-top: 0.5px;*/
+  height: 30.5px;
+}
+.connection-menu .new-key-btn {
+  width: 100%;
+}
+.connection-menu .search-item {
+  margin-top: -10px;
+  margin-bottom: 15px;
+}
+.connection-menu .search-input {
+  width: 100%;
+}
+.connection-menu .search-input .el-input__inner {
+  padding-right: 43px;
+  /*margin-top: -10px;;
     margin-bottom: 15px;*/
-  }
+}
 
-  .connection-menu .el-submenu__title .el-submenu__icon-arrow {
-    right: 7px;
-    top: 54%;
-  }
-  .connection-menu .el-submenu [class^=el-icon-] {
-    font-size: 13px;
-    margin: 0px;
-    width: auto;
-    color: grey;
-  }
+.connection-menu .el-submenu__title .el-submenu__icon-arrow {
+  right: 7px;
+  top: 54%;
+}
+.connection-menu .el-submenu [class^="el-icon-"] {
+  font-size: 13px;
+  margin: 0px;
+  width: auto;
+  color: grey;
+}
 
-  .connection-menu .el-submenu.is-opened {
-    /*background: #ECF5FF;*/
-  }
+.connection-menu .el-submenu.is-opened {
+  /*background: #ECF5FF;*/
+}
 
-  .connection-menu .connection-form {
-    /*padding-right: 8px;*/
-  }
+.connection-menu .connection-form {
+  /*padding-right: 8px;*/
+}
 
-  .connection-menu .search-item .search-icon {
-    font-size: 128%;
-    color: #a5a8ad;
-    cursor: pointer;
-  }
-  .connection-menu .search-item .el-checkbox__input {
-    /*line-height: 28px;*/
-    display: inline;
-  }
+.connection-menu .search-item .search-icon {
+  font-size: 128%;
+  color: #a5a8ad;
+  cursor: pointer;
+}
+.connection-menu .search-item .el-checkbox__input {
+  /*line-height: 28px;*/
+  display: inline;
+}
 </style>
