@@ -128,6 +128,12 @@ export default {
         items = JSON.parse(val);
       }
 
+      // Deduplication
+      const values = items.map(x => x.value);
+      if (values.includes(item.value)) {
+        return;
+      }
+
       // maintain 20 length
       if (items.length > 20) {
         items = items.slice(-19);
